@@ -241,10 +241,15 @@ def train():
 
 
     ## dump the final model and evaluate the result
+    checkpoint = {
+                'iteration': cfg.max_iter,
+                'state_dict': net.state_dict(),
+                'optimizer': optim.state_dict(),
+                'lr_schdr': lr_schdr.state_dict(),
+                }
     save_pth = osp.join(args.saveCheckpointDir, 'model_final.pt')
     logger.info('\nsave Final models to {}'.format(save_pth))
-    state = net.module.state_dict()
-    if dist.get_rank() == 0: torch.save(state, save_pth)
+    save_ckp(checkpoint, save_pth)
 
     logger.info('\nevaluating the final model')
     torch.cuda.empty_cache()
