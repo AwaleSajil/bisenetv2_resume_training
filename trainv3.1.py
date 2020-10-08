@@ -50,7 +50,7 @@ def parse_args():
     parse.add_argument('--model', dest='model', type=str, default='bisenetv2',)
     parse.add_argument('--finetune-from', type=str, default=None,)
     parse.add_argument('-s', '--saveCheckpointDir', type=str, required=True, help = "folder to which intermidiate checkpoint are to be saved", default=None)
-    parse.add_argument('-si', '--saveOnEveryEpoch', type=int, help = "Save a checkpoint after this many epoch", default=5000)
+    parse.add_argument('-se', '--saveOnEveryEpoch', type=int, help = "Save a checkpoint after this many epoch", default=5000)
     parse.add_argument('-l', '--loadCheckpointLocation', type=str, help="location to the checkpoint you want to resume training" ,default=None)
     return parse.parse_args()
 
