@@ -218,22 +218,22 @@ def train():
 
 
 
-        ## dump the final model and evaluate the result
-        checkpoint = {
-                    'epoch': max_epoch,
-                    'state_dict': net.state_dict(),
-                    'optimizer': optim.state_dict(),
-                    'lr_schdr': lr_schdr.state_dict(),
-                    }
-        save_pth = osp.join(args.saveCheckpointDir, 'model_final.pt')
-        logger.info('\nsave Final models to {}'.format(save_pth))
-        save_ckp(checkpoint, save_pth)
+    ## dump the final model and evaluate the result
+    checkpoint = {
+                'epoch': max_epoch,
+                'state_dict': net.state_dict(),
+                'optimizer': optim.state_dict(),
+                'lr_schdr': lr_schdr.state_dict(),
+                }
+    save_pth = osp.join(args.saveCheckpointDir, 'model_final.pt')
+    logger.info('\nsave Final models to {}'.format(save_pth))
+    save_ckp(checkpoint, save_pth)
 
-        logger.info('\nevaluating the final model')
-        torch.cuda.empty_cache()
-        heads, mious = eval_model(net, 2, cfg.im_root, cfg.val_im_anns)
-        logger.info(tabulate([mious, ], headers=heads, tablefmt='orgtbl'))
-        return
+    logger.info('\nevaluating the final model')
+    torch.cuda.empty_cache()
+    heads, mious = eval_model(net, 2, cfg.im_root, cfg.val_im_anns)
+    logger.info(tabulate([mious, ], headers=heads, tablefmt='orgtbl'))
+    return
 
 
 def main():
