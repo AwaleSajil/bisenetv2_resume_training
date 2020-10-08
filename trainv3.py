@@ -34,6 +34,9 @@ except ImportError:
     has_apex = False
 
 
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+
 ## fix all random seeds
 torch.manual_seed(123)
 torch.cuda.manual_seed(123)
@@ -69,8 +72,8 @@ def load_ckp(checkpoint_fpath, model, optimizer, lr_schdr):
     return model, optimizer, lr_schdr, checkpoint['iteration']
 
 def save_ckp(state, save_pth):
-    if dist.get_rank() == 0: torch.save(state, save_pth)
-    # torch.save(state, save_pth)
+    # if dist.get_rank() == 0: torch.save(state, save_pth)
+    torch.save(state, save_pth)
 
 
 def set_model():
@@ -81,8 +84,8 @@ def set_model():
         net.load_state_dict(checkpoint['state_dict'])
 
 
-    if cfg.use_sync_bn: net = set_syncbn(net)
-    net.cuda()
+    # if cfg.use_sync_bn: net = set_syncbn(net)
+    net.to(device)
     net.train()
     criteria_pre = OhemCELoss(0.7)
     criteria_aux = [OhemCELoss(0.7) for _ in range(cfg.num_aux_heads)]
@@ -148,13 +151,13 @@ def set_meters():
 
 def train():
     logger = logging.getLogger()
-    is_dist = dist.is_initialized()
+    # is_dist = dist.is_initialized()
 
     ## dataset
     dl = get_data_loader(
             cfg.im_root, cfg.train_im_anns,
             cfg.ims_per_gpu, cfg.scales, cfg.cropsize,
-            cfg.max_iter, mode='train', distributed=is_dist)
+            cfg.max_iter, mode='train', distributed=False)
 
     ## model
     net, criteria_pre, criteria_aux = set_model()
@@ -170,7 +173,7 @@ def train():
         net, optim = amp.initialize(net, optim, opt_level=opt_level)
 
     ## ddp training
-    net = set_model_dist(net)
+    # net = set_model_dist(net)
 
     ## meters
     time_meter, loss_meter, loss_pre_meter, loss_aux_meters = set_meters()
@@ -190,8 +193,8 @@ def train():
     for current_it, (im, lb) in enumerate(dl):
         #on resumed training 'it' will be incremented from what was left else the sum is 0 anyways
         it = current_it + start_iteration
-        im = im.cuda()
-        lb = lb.cuda()
+        im = im.to(device)
+        lb = lb.to(device)
 
         lb = torch.squeeze(lb, 1)
 
@@ -206,7 +209,7 @@ def train():
         else:
             loss.backward()
         optim.step()
-        torch.cuda.synchronize()
+        # torch.cuda.synchronize()
         lr_schdr.step()
 
         time_meter.update()
@@ -258,13 +261,13 @@ def train():
 
 
 def main():
-    torch.cuda.set_device(args.local_rank)
-    dist.init_process_group(
-        backend='nccl',
-        init_method='tcp://127.0.0.1:{}'.format(args.port),
-        world_size=torch.cuda.device_count(),
-        rank=args.local_rank
-    )
+    # torch.cuda.set_device(args.local_rank)
+    # dist.init_process_group(
+    #     backend='nccl',
+    #     init_method='tcp://127.0.0.1:{}'.format(args.port),
+    #     world_size=torch.cuda.device_count(),
+    #     rank=args.local_rank
+    # )
     if not osp.exists(cfg.respth): os.makedirs(cfg.respth)
     setup_logger('{}-train'.format(cfg.model_type), cfg.respth)
     print(args.saveCheckpointDir, args.loadCheckpointLocation, args.saveOnEveryIt)
