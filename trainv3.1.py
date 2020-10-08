@@ -193,7 +193,7 @@ def train():
             _ = [mter.update(lss.item()) for mter, lss in zip(loss_aux_meters, loss_aux)]
 
             ## print training log message
-            total_it = (it + 1) + epoch*iteration_per_epoch
+            total_it = it + epoch*iteration_per_epoch
             if (it + 1) % 100 == 0:
                 lr = lr_schdr.get_lr()
                 lr = sum(lr) / len(lr)
