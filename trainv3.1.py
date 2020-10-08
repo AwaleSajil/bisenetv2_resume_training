@@ -50,7 +50,7 @@ def parse_args():
     parse.add_argument('--model', dest='model', type=str, default='bisenetv2',)
     parse.add_argument('--finetune-from', type=str, default=None,)
     parse.add_argument('-s', '--saveCheckpointDir', type=str, required=True, help = "folder to which intermidiate checkpoint are to be saved", default=None)
-    parse.add_argument('-si', '--saveOnEveryIt', type=int, help = "Save a checkpoint after this many iteration", default=5000)
+    parse.add_argument('-si', '--saveOnEveryEpoch', type=int, help = "Save a checkpoint after this many epoch", default=5000)
     parse.add_argument('-l', '--loadCheckpointLocation', type=str, help="location to the checkpoint you want to resume training" ,default=None)
     return parse.parse_args()
 
@@ -63,7 +63,7 @@ def load_ckp(checkpoint_fpath, model, optimizer, lr_schdr):
     model.load_state_dict(checkpoint['state_dict'])
     optimizer.load_state_dict(checkpoint['optimizer'])
     lr_schdr.load_state_dict(checkpoint['lr_schdr'])
-    return model, optimizer, lr_schdr, checkpoint['iteration']
+    return model, optimizer, lr_schdr, checkpoint['epoch']
 
 def save_ckp(state, save_pth):
     torch.save(state, save_pth)
@@ -72,7 +72,6 @@ def save_ckp(state, save_pth):
 def set_model():
     net = model_factory[cfg.model_type](19)
     if not args.finetune_from is None:
-        # net.load_state_dict(torch.load(args.finetune_from, map_location='cpu'))
         checkpoint = torch.load(args.finetune_from, map_location='cpu')
         net.load_state_dict(checkpoint['state_dict'])
 
@@ -129,15 +128,19 @@ def train():
             cfg.ims_per_gpu, cfg.scales, cfg.cropsize,
             cfg.max_iter, mode='train', distributed=False)
 
-    print("Dl lenght:" len(dl))
+    #finding max epoch to train
+    dataset_length = len(dl.dataset)
+    print("Dataset length: ", dataset_length)
+    batch_size = cfg.ims_per_gpu
+    iteration_per_epoch = int(dataset_length/batch_size)
+    max_epoch = int(cfg.max_iter/iteration_per_epoch)
+    print("Max_epoch: ", max_epoch)
 
     ## model
     net, criteria_pre, criteria_aux = set_model()
 
     ## optimizer
     optim = set_optimizer(net)
-
-   
 
     ## fp16
     if has_apex:
@@ -155,84 +158,88 @@ def train():
 
      ##load checkpoin if exits for resuming training
     if  args.loadCheckpointLocation != None:
-        net, optim, lr_schdr, start_iteration = load_ckp(args.loadCheckpointLocation, net, optim, lr_schdr)
+        net, optim, lr_schdr, start_epoch = load_ckp(args.loadCheckpointLocation, net, optim, lr_schdr)
     else:
-        start_iteration = 0
+        start_epoch = 0
 
     ## train loop
-    for current_it, (im, lb) in enumerate(dl):
-        #on resumed training 'it' will be incremented from what was left else the sum is 0 anyways
-        it = current_it + start_iteration
-        im = im.to(device)
-        lb = lb.to(device)
+    for current_epoch in range(max_epoch):
+        #on resumed training 'epoch' will be incremented from what was left else the sum is 0 anyways
+        epoch = start_epoch + current_epoch
 
-        lb = torch.squeeze(lb, 1)
+        for it, (im, lb) in enumerate(dl):
+            
+            im = im.to(device)
+            lb = lb.to(device)
 
-        optim.zero_grad()
-        logits, *logits_aux = net(im)
-        loss_pre = criteria_pre(logits, lb)
-        loss_aux = [crit(lgt, lb) for crit, lgt in zip(criteria_aux, logits_aux)]
-        loss = loss_pre + sum(loss_aux)
-        if has_apex:
-            with amp.scale_loss(loss, optim) as scaled_loss:
-                scaled_loss.backward()
-        else:
-            loss.backward()
-        optim.step()
-        lr_schdr.step()
+            lb = torch.squeeze(lb, 1)
 
-        time_meter.update()
-        loss_meter.update(loss.item())
-        loss_pre_meter.update(loss_pre.item())
-        _ = [mter.update(lss.item()) for mter, lss in zip(loss_aux_meters, loss_aux)]
+            optim.zero_grad()
+            logits, *logits_aux = net(im)
+            loss_pre = criteria_pre(logits, lb)
+            loss_aux = [crit(lgt, lb) for crit, lgt in zip(criteria_aux, logits_aux)]
+            loss = loss_pre + sum(loss_aux)
+            if has_apex:
+                with amp.scale_loss(loss, optim) as scaled_loss:
+                    scaled_loss.backward()
+            else:
+                loss.backward()
+            optim.step()
+            lr_schdr.step()
 
-        ## print training log message
-        if (it + 1) % 100 == 0:
-            lr = lr_schdr.get_lr()
-            lr = sum(lr) / len(lr)
-            print_log_msg(
-                it, cfg.max_iter, lr, time_meter, loss_meter,
-                loss_pre_meter, loss_aux_meters)
+            time_meter.update()
+            loss_meter.update(loss.item())
+            loss_pre_meter.update(loss_pre.item())
+            _ = [mter.update(lss.item()) for mter, lss in zip(loss_aux_meters, loss_aux)]
 
-        #save the checkpoint on every some iteration
-        if (it + 1) % args.saveOnEveryIt == 0:
+            ## print training log message
+            total_it = (it + 1) + epoch*iteration_per_epoch
+            if (it + 1) % 100 == 0:
+                lr = lr_schdr.get_lr()
+                lr = sum(lr) / len(lr)
+                print_log_msg(
+                    total_it, cfg.max_iter, lr, time_meter, loss_meter,
+                    loss_pre_meter, loss_aux_meters)
+
+        #save the checkpoint on every some epoch
+        if (epoch + 1) % args.saveOnEveryEpoch == 0:
             if args.saveCheckpointDir != None:
                 checkpoint = {
-                    'iteration': it + 1,
+                    'epoch': epoch + 1,
                     'state_dict': net.state_dict(),
                     'optimizer': optim.state_dict(),
                     'lr_schdr': lr_schdr.state_dict(),
                 }
-                iteration_no_str = (str(it+1)).zfill(len(str(cfg.max_iter)))
-                ckt_name = 'checkpoint_it_' +iteration_no_str + '.pt'
+                epoch_no_str = (str(epoch+1)).zfill(len(str(cfg.max_iter)))
+                ckt_name = 'checkpoint_epoch_' + epoch_no_str + '.pt'
                 save_pth = osp.join(args.saveCheckpointDir, ckt_name)
                 logger.info('\nsaving intermidiate checkpoint to {}'.format(save_pth))
                 save_ckp(checkpoint, save_pth)
 
 
 
-    ## dump the final model and evaluate the result
-    checkpoint = {
-                'iteration': cfg.max_iter,
-                'state_dict': net.state_dict(),
-                'optimizer': optim.state_dict(),
-                'lr_schdr': lr_schdr.state_dict(),
-                }
-    save_pth = osp.join(args.saveCheckpointDir, 'model_final.pt')
-    logger.info('\nsave Final models to {}'.format(save_pth))
-    save_ckp(checkpoint, save_pth)
+        ## dump the final model and evaluate the result
+        checkpoint = {
+                    'epoch': cfg.max_iter,
+                    'state_dict': net.state_dict(),
+                    'optimizer': optim.state_dict(),
+                    'lr_schdr': lr_schdr.state_dict(),
+                    }
+        save_pth = osp.join(args.saveCheckpointDir, 'model_final.pt')
+        logger.info('\nsave Final models to {}'.format(save_pth))
+        save_ckp(checkpoint, save_pth)
 
-    logger.info('\nevaluating the final model')
-    torch.cuda.empty_cache()
-    heads, mious = eval_model(net, 2, cfg.im_root, cfg.val_im_anns)
-    logger.info(tabulate([mious, ], headers=heads, tablefmt='orgtbl'))
-    return
+        logger.info('\nevaluating the final model')
+        torch.cuda.empty_cache()
+        heads, mious = eval_model(net, 2, cfg.im_root, cfg.val_im_anns)
+        logger.info(tabulate([mious, ], headers=heads, tablefmt='orgtbl'))
+        return
 
 
 def main():
     if not osp.exists(cfg.respth): os.makedirs(cfg.respth)
     setup_logger('{}-train'.format(cfg.model_type), cfg.respth)
-    print(args.saveCheckpointDir, args.loadCheckpointLocation, args.saveOnEveryIt)
+    print(args.saveCheckpointDir, args.loadCheckpointLocation, args.saveOnEveryEpoch)
     train()
     
 
