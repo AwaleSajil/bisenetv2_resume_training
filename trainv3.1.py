@@ -220,7 +220,7 @@ def train():
 
         ## dump the final model and evaluate the result
         checkpoint = {
-                    'epoch': cfg.max_iter,
+                    'epoch': max_epoch,
                     'state_dict': net.state_dict(),
                     'optimizer': optim.state_dict(),
                     'lr_schdr': lr_schdr.state_dict(),
@@ -239,7 +239,7 @@ def train():
 def main():
     if not osp.exists(cfg.respth): os.makedirs(cfg.respth)
     setup_logger('{}-train'.format(cfg.model_type), cfg.respth)
-    print(args.saveCheckpointDir, args.loadCheckpointLocation, args.saveOnEveryEpoch)
+    print("Args sent: ", args.saveCheckpointDir, args.loadCheckpointLocation, args.saveOnEveryEpoch)
     train()
     
 
